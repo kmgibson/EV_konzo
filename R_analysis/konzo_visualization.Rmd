@@ -120,48 +120,57 @@ colnames(patho.tax_mat) <- ranks
 
 ## Fetching Taxonomic Names from TaxonID
 ```{r NCBI taxonomy fetch}
-UID2tax_mat <- function (taxmat, start_list = 1) { #function takes a matrix as input. matrix needs Taxon_IDs as rownames & taxonomic ranks as column names.
-  #set start_list to 1 normally, set it to something else if interrupted and need to start in the middle
-  num.UID.lists <- ceiling(length(rownames(taxmat))/100) #query NCBI 500 UIDs at a time
-  for(list.num in start_list:num.UID.lists){
-    start.num <- (list.num-1)*100+1
-    if (list.num == num.UID.lists) {
-      end.num <- length(rownames(taxmat))
-    } else {
-      end.num <- list.num*100
-    }
-    UID.string <- paste(rownames(taxmat)[start.num:end.num],collapse = ',')
-    upload <- entrez_post(db="taxonomy", id=UID.string)
-    fetch <- entrez_fetch(db="taxonomy", web_history=upload, rettype="xml", parsed=TRUE)
-    fetch.df <- XML::xmlToList(fetch)
-    for (row.num.i in start.num:end.num) {
-      counter <- row.num.i- (list.num-1)*100
-      if (is.null(fetch.df[counter]$Taxon$TaxId)) {
-        next #skip line if null
-      }
-      if (length(fetch.df[counter]$Taxon$LineageEx) > 0) {
-        for(it in 1:length(fetch.df[counter]$Taxon$LineageEx)) {
-          if ((fetch.df[counter]$Taxon$LineageEx[it]$Taxon$Rank %in% ranks)) {
-            taxmat[which(row.names(taxmat) == fetch.df[counter]$Taxon$TaxId),fetch.df[counter]$Taxon$LineageEx[it]$Taxon$Rank] <- fetch.df[counter]$Taxon$LineageEx[it]$Taxon$ScientificName
-          }
-        }
-      }
-    }
-    print(paste("List ", list.num, "/ ", num.UID.lists," retrieved."))
-    Sys.sleep(30)
-  }
-  return(taxmat)
-}
+### I commented out the old way that had some errors. But kept for personal reference, until I spend time updating this later - KMG.
 
-patho.tax_mat.filled <- UID2tax_mat(patho.tax_mat) #uncomment this to load
-patho.tax <- tax_table(patho.tax_mat.filled[,c('superkingdom','phylum','class','order','family','genus','species')]) #not all of the columns (ranks) that we specified earlier are used.
-pathoscope.phy <- phyloseq(otu_table(patho.otu_mat, taxa_are_rows = TRUE), tax_table(patho.tax))
+# UID2tax_mat <- function (taxmat, start_list = 1) { #function takes a matrix as input. matrix needs Taxon_IDs as rownames & taxonomic ranks as column names.
+#   #set start_list to 1 normally, set it to something else if interrupted and need to start in the middle
+#   num.UID.lists <- ceiling(length(rownames(taxmat))/100) #query NCBI 500 UIDs at a time
+#   for(list.num in start_list:num.UID.lists){
+#     start.num <- (list.num-1)*100+1
+#     if (list.num == num.UID.lists) {
+#       end.num <- length(rownames(taxmat))
+#     } else {
+#       end.num <- list.num*100
+#     }
+#     UID.string <- paste(rownames(taxmat)[start.num:end.num],collapse = ',')
+#     upload <- entrez_post(db="taxonomy", id=UID.string)
+#     fetch <- entrez_fetch(db="taxonomy", web_history=upload, rettype="xml", parsed=TRUE)
+#     fetch.df <- XML::xmlToList(fetch)
+#     for (row.num.i in start.num:end.num) {
+#       counter <- row.num.i- (list.num-1)*100
+#       if (is.null(fetch.df[counter]$Taxon$TaxId)) {
+#         next #skip line if null
+#       }
+#       if (length(fetch.df[counter]$Taxon$LineageEx) > 0) {
+#         for(it in 1:length(fetch.df[counter]$Taxon$LineageEx)) {
+#           if ((fetch.df[counter]$Taxon$LineageEx[it]$Taxon$Rank %in% ranks)) {
+#             taxmat[which(row.names(taxmat) == fetch.df[counter]$Taxon$TaxId),fetch.df[counter]$Taxon$LineageEx[it]$Taxon$Rank] <- fetch.df[counter]$Taxon$LineageEx[it]$Taxon$ScientificName
+#           }
+#         }
+#       }
+#     }
+#     print(paste("List ", list.num, "/ ", num.UID.lists," retrieved."))
+#     Sys.sleep(30)
+#   }
+#   return(taxmat)
+# }
+#
+#patho.tax_mat.filled <- UID2tax_mat(patho.tax_mat) #uncomment this to load
+#patho.tax <- tax_table(patho.tax_mat.filled[,c('superkingdom','phylum','class','order','family','genus','species')]) #not all of the columns (ranks) that we specified earlier are used.
+########
+
+
+# New way from BNN to use taxonimzer to get taxonomic info from NCBI easier.
+getNamesAndNodes() # Downloads nodes.dmp and names.dmp files from NCBI
+tNodes <- read.nodes("nodes.dmp")
+tNames <- read.names("names.dmp")
+patho.tax <- getTaxonomy(rownames(patho.otu_mat), tNodes, tNames, mc.cores = parallel::detectCores()-1)  # use all cores. This may take a while.
+rownames(patho.tax) <- trimws(rownames(patho.tax)) #takes away whitespace
+
+pathoscope.phy <- phyloseq(otu_table(patho.otu_mat, taxa_are_rows = TRUE), tax_table(patho.tax)) #creates phyloseq object
 
 # loading sample data
 pathoscope.phy = merge_phyloseq(pathoscope.phy, sample_data(sampledata))
-
-write.csv(otu_table(pathoscope.phy), file = "otu_mat.csv") #Save this in case you need it later.
-write.csv(tax_table(pathoscope.phy), file = "tax_mat.csv") #Save this in case you need it later.
 #tax_mat <- read.delim('tax_mat.tsv')
 ```
 
